@@ -17,13 +17,20 @@ import (
 	llama "github.com/tcpipuk/llama-go"
 )
 
-var (
-	embedCtx *llama.Context
-	// Context is NOT thread-safe (llama-go docs). The library's RLock on
-	// GetEmbeddings only protects its own fields — concurrent C++ calls on
-	// the same context cause data races. Serialize all inference calls.
-	ctxMu sync.Mutex
-)
+// Embedder is the inference capability the server depends on.
+// *llama.Context satisfies this interface directly.
+type Embedder interface {
+	GetEmbeddings(text string) ([]float32, error)
+	GetEmbeddingsBatch(texts []string) ([][]float32, error)
+}
+
+type server struct {
+	embedder Embedder
+	// mu serializes all calls into the llama.cpp context.
+	// Context is NOT thread-safe (llama-go docs) — the library's RLock on
+	// GetEmbeddings only protects Go fields, not the underlying C++ state.
+	mu sync.Mutex
+}
 
 type embedRequest struct {
 	Text string `json:"text"`
@@ -53,12 +60,12 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(errorResponse{Error: msg})
 }
 
-func handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-func handleEmbed(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleEmbed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -74,9 +81,9 @@ func handleEmbed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctxMu.Lock()
-	embedding, err := embedCtx.GetEmbeddings(req.Text)
-	ctxMu.Unlock()
+	s.mu.Lock()
+	embedding, err := s.embedder.GetEmbeddings(req.Text)
+	s.mu.Unlock()
 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -90,7 +97,7 @@ func handleEmbed(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleBatch(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -106,9 +113,9 @@ func handleBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctxMu.Lock()
-	embeddings, err := embedCtx.GetEmbeddingsBatch(req.Texts)
-	ctxMu.Unlock()
+	s.mu.Lock()
+	embeddings, err := s.embedder.GetEmbeddingsBatch(req.Texts)
+	s.mu.Unlock()
 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -133,18 +140,13 @@ func handleBatch(w http.ResponseWriter, r *http.Request) {
 // not immediately return them, so RSS stays high. FreeOSMemory upgrades this
 // to MADV_DONTNEED, which causes the kernel to reclaim the pages right away.
 //
-// glibc malloc (used by llama.cpp) has the same behaviour — freed C-heap
-// blocks stay in its pool. MALLOC_TRIM_THRESHOLD_ (set in the Dockerfile)
-// controls when glibc trims its arena, but calling malloc_trim(0) here via
-// FreeOSMemory's GC pass also indirectly prompts glibc to release pages
-// because fewer Go-heap pointers are pinned across CGO boundaries.
+// malloc_trim(0) compacts the glibc sbrk arena for any remaining small
+// allocations not covered by MALLOC_MMAP_THRESHOLD_. jemalloc (injected via
+// LD_PRELOAD in entrypoint.sh) provides a compatible implementation and
+// triggers its own background decay in response.
 func freeMemoryLoop(interval time.Duration) {
 	for range time.Tick(interval) {
-		// Return freed Go heap pages to the OS (MADV_FREE → MADV_DONTNEED).
 		debug.FreeOSMemory()
-		// Compact and trim the glibc main arena. Allocations ≥ MALLOC_MMAP_THRESHOLD_
-		// already bypass this arena (they use mmap and are freed immediately), so
-		// malloc_trim only needs to handle the smaller sbrk-based blocks.
 		C.malloc_trim(0)
 	}
 }
@@ -179,7 +181,7 @@ func main() {
 	}
 	defer model.Close()
 
-	embedCtx, err = model.NewContext(
+	embedCtx, err := model.NewContext(
 		llama.WithEmbeddings(),
 		// Disable prefix caching: for embeddings each input is independent,
 		// caching only grows the KV store over time without any benefit.
@@ -187,7 +189,7 @@ func main() {
 		// Bound the KV cache to a fixed window. Default (0) uses the model's
 		// native max (often 8192+), which with n_parallel=8 multiplies fast.
 		llama.WithContext(*contextSize),
-		// Single parallel sequence: we serialize requests with ctxMu anyway,
+		// Single parallel sequence: we serialize requests with mu anyway,
 		// so extra slots just waste memory (default for embedding ctx is 8).
 		llama.WithParallel(1),
 	)
@@ -196,9 +198,10 @@ func main() {
 	}
 	defer embedCtx.Close()
 
-	http.HandleFunc("/health", handleHealth)
-	http.HandleFunc("/embed", handleEmbed)
-	http.HandleFunc("/embed/batch", handleBatch)
+	srv := &server{embedder: embedCtx}
+	http.HandleFunc("/health", srv.handleHealth)
+	http.HandleFunc("/embed", srv.handleEmbed)
+	http.HandleFunc("/embed/batch", srv.handleBatch)
 
 	log.Printf("listening on %s", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))

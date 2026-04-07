@@ -25,6 +25,8 @@ RUN make libbinding.a CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF"
 
 # Copy the embedding server source into the cloned module so it resolves imports locally
 COPY main.go ./cmd/embedserver/main.go
+COPY main_test.go ./cmd/embedserver/main_test.go
+COPY main_integration_test.go ./cmd/embedserver/main_integration_test.go
 
 RUN LIBRARY_PATH=/workspace \
     C_INCLUDE_PATH=/workspace \

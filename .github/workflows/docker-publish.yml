@@ -1,4 +1,4 @@
-name: Publish Docker image
+name: Test and publish Docker image
 
 on:
   push:
@@ -6,7 +6,45 @@ on:
       - main
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build builder stage
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: builder
+          load: true
+          tags: llama-embedserver-builder:ci
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/llama-embedserver:cache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/llama-embedserver:cache,mode=max
+
+      - name: Run unit tests
+        run: |
+          docker run --rm llama-embedserver-builder:ci \
+            sh -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace CGO_ENABLED=1 \
+                   go test -v -count=1 ./cmd/embedserver/"
+
+      - name: Run unit tests with race detector
+        run: |
+          docker run --rm llama-embedserver-builder:ci \
+            sh -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace CGO_ENABLED=1 \
+                   go test -race -v -count=1 ./cmd/embedserver/"
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
