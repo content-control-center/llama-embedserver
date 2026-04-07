@@ -44,6 +44,11 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /usr/local/bin/embedserver /usr/local/bin/embedserver
 COPY --from=model /model.gguf /model.gguf
 
+# Trim the glibc malloc arena back to the OS whenever a free block exceeds
+# 128 KiB. Without this, glibc keeps a large free-list for reuse and RSS
+# stays high even after llama.cpp frees its batch/computation buffers.
+ENV MALLOC_TRIM_THRESHOLD_=131072
+
 EXPOSE 8080
 
 ENTRYPOINT ["embedserver"]

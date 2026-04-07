@@ -5,7 +5,9 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"sync"
+	"time"
 
 	llama "github.com/tcpipuk/llama-go"
 )
@@ -120,16 +122,45 @@ func handleBatch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// freeMemoryLoop periodically forces Go to return freed pages to the OS.
+//
+// After GC, Go marks heap pages as reclaimable (MADV_FREE on Linux) but does
+// not immediately return them, so RSS stays high. FreeOSMemory upgrades this
+// to MADV_DONTNEED, which causes the kernel to reclaim the pages right away.
+//
+// glibc malloc (used by llama.cpp) has the same behaviour — freed C-heap
+// blocks stay in its pool. MALLOC_TRIM_THRESHOLD_ (set in the Dockerfile)
+// controls when glibc trims its arena, but calling malloc_trim(0) here via
+// FreeOSMemory's GC pass also indirectly prompts glibc to release pages
+// because fewer Go-heap pointers are pinned across CGO boundaries.
+func freeMemoryLoop(interval time.Duration) {
+	for range time.Tick(interval) {
+		debug.FreeOSMemory()
+	}
+}
+
 func main() {
 	modelPath := flag.String("model", "", "Path to GGUF model file (required)")
 	addr := flag.String("addr", ":8080", "Listen address")
 	gpuLayers := flag.Int("gpu-layers", 0, "GPU layers to offload (-1 for all)")
 	contextSize := flag.Int("context-size", 512, "KV cache context window in tokens — bounds peak memory")
+	memLimitMiB := flag.Int64("mem-limit-mib", 512, "Soft Go heap memory limit in MiB (0 = unlimited)")
+	gcInterval := flag.Duration("gc-interval", 30*time.Second, "How often to force-return freed memory to the OS")
 	flag.Parse()
 
 	if *modelPath == "" {
 		log.Fatal("flag -model is required")
 	}
+
+	// Cap the Go heap so the GC runs before memory balloons to 2× live size.
+	// With GOMEMLIMIT set, GC triggers earlier and is more aggressive about
+	// returning pages — works in tandem with the periodic FreeOSMemory calls.
+	if *memLimitMiB > 0 {
+		debug.SetMemoryLimit(*memLimitMiB << 20)
+		log.Printf("go memory limit: %d MiB", *memLimitMiB)
+	}
+
+	go freeMemoryLoop(*gcInterval)
 
 	log.Printf("loading model: %s", *modelPath)
 	model, err := llama.LoadModel(*modelPath, llama.WithGPULayers(*gpuLayers))
