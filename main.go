@@ -144,7 +144,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "Listen address")
 	gpuLayers := flag.Int("gpu-layers", 0, "GPU layers to offload (-1 for all)")
 	contextSize := flag.Int("context-size", 512, "KV cache context window in tokens — bounds peak memory")
-	memLimitMiB := flag.Int64("mem-limit-mib", 512, "Soft Go heap memory limit in MiB (0 = unlimited)")
+	memLimitMiB := flag.Int64("mem-limit-mib", 128, "Soft Go heap memory limit in MiB (0 = unlimited)")
 	gcInterval := flag.Duration("gc-interval", 30*time.Second, "How often to force-return freed memory to the OS")
 	flag.Parse()
 
