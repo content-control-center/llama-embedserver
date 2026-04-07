@@ -99,19 +99,24 @@ The server runs in a CGO environment where memory is split across two heaps — 
 
 ### C heap (llama.cpp)
 
-llama.cpp uses glibc's ptmalloc2 allocator, which has two problems for long-running servers:
+glibc's default allocator (ptmalloc2) has two fundamental problems for long-running servers:
 
-**Fragmentation** — ptmalloc2 manages memory via a contiguous `sbrk` heap. Freed blocks are returned to the OS only if the *top* of the heap is free. A single live allocation anywhere below traps all freed memory above it. Over a long run this causes RSS to grow monotonically even though allocations are balanced.
+**Fragmentation** — ptmalloc2 manages memory via a contiguous `sbrk` heap. Freed blocks can only be returned to the OS if the *top* of the heap is free. A single live allocation anywhere below traps all freed memory above it, causing RSS to grow monotonically over a long run even though allocations are balanced.
 
 **Arena pooling** — freed blocks are kept in a free-list for reuse rather than returned to the OS, so RSS stays high even after `free()`.
 
-Three mitigations are applied:
+Tuning glibc (`MALLOC_MMAP_THRESHOLD_`, `MALLOC_TRIM_THRESHOLD_`, `malloc_trim`) attacks symptoms but cannot fix the fragmentation problem — it is structural.
 
-| Mechanism | What it does |
-|-----------|-------------|
-| `MALLOC_MMAP_THRESHOLD_=65536` | Allocations ≥ 64 KiB (llama.cpp batch buffers, ggml compute) use `mmap` instead of `sbrk`. `mmap` blocks are always returned to the OS on `free()` — fragmentation is impossible for these. |
-| `MALLOC_TRIM_THRESHOLD_=131072` | After a `free()`, glibc trims contiguous free space at the top of the `sbrk` arena back to the OS if it exceeds 128 KiB. |
-| `malloc_trim(0)` (called every `-gc-interval`) | Explicitly compacts and trims the `sbrk` arena on schedule, reclaiming whatever contiguous free space has accumulated at the top since the last trim. |
+**The fix is jemalloc**, injected at runtime via `LD_PRELOAD` by the container entrypoint. jemalloc replaces ptmalloc2 for all C/C++ allocations (llama.cpp, ggml). Go manages its own heap directly via `mmap` and is unaffected.
+
+| `MALLOC_CONF` option | What it does |
+|----------------------|-------------|
+| `background_thread:true` | Spawns a dedicated thread that returns dirty pages to the OS on a timer — no manual `malloc_trim` calls needed. |
+| `dirty_decay_ms:1000` | Dirty pages (freed, `MADV_DONTNEED` pending) are released to the OS after 1 s. |
+| `muzzy_decay_ms:1000` | Muzzy pages (freed, `MADV_FREE`, reclaimable by kernel) are fully released after 1 s. |
+| `narenas:1` | Single arena prevents per-thread arena proliferation, which would multiply fragmented regions. |
+
+`malloc_trim(0)` is still called in the Go periodic loop as a fallback — jemalloc provides a compatible implementation that triggers its own cleanup.
 
 ### KV cache
 

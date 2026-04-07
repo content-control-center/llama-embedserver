@@ -39,21 +39,22 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     libcurl4 \
     ca-certificates \
+    libjemalloc2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/bin/embedserver /usr/local/bin/embedserver
 COPY --from=model /model.gguf /model.gguf
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Force C allocations ≥ 64 KiB to use mmap instead of sbrk. mmap blocks are
-# always returned to the OS on free(), bypassing ptmalloc2's arena entirely —
-# no heap fragmentation possible for llama.cpp's larger batch/buffer allocs.
-ENV MALLOC_MMAP_THRESHOLD_=65536
-# Trim the sbrk arena after freeing small blocks. Works in tandem with the
-# malloc_trim(0) call in the Go periodic loop and with MALLOC_MMAP_THRESHOLD_
-# (which handles large blocks via mmap instead).
-ENV MALLOC_TRIM_THRESHOLD_=131072
+# jemalloc tuning (active when entrypoint.sh injects it via LD_PRELOAD):
+#   background_thread - dedicated thread returns dirty pages to OS on a timer
+#   dirty_decay_ms    - pages held dirty (MADV_DONTNEED pending) for 1 s then released
+#   muzzy_decay_ms    - pages held muzzy (MADV_FREE, reclaimable) for 1 s then released
+#   narenas:1         - single arena avoids per-thread arena fragmentation
+ENV MALLOC_CONF="background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000,narenas:1"
 
 EXPOSE 8080
 
-ENTRYPOINT ["embedserver"]
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["-model", "/model.gguf"]
