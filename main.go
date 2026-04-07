@@ -1,5 +1,10 @@
 package main
 
+/*
+#include <malloc.h>
+*/
+import "C"
+
 import (
 	"encoding/json"
 	"flag"
@@ -135,7 +140,12 @@ func handleBatch(w http.ResponseWriter, r *http.Request) {
 // because fewer Go-heap pointers are pinned across CGO boundaries.
 func freeMemoryLoop(interval time.Duration) {
 	for range time.Tick(interval) {
+		// Return freed Go heap pages to the OS (MADV_FREE → MADV_DONTNEED).
 		debug.FreeOSMemory()
+		// Compact and trim the glibc main arena. Allocations ≥ MALLOC_MMAP_THRESHOLD_
+		// already bypass this arena (they use mmap and are freed immediately), so
+		// malloc_trim only needs to handle the smaller sbrk-based blocks.
+		C.malloc_trim(0)
 	}
 }
 

@@ -44,9 +44,13 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /usr/local/bin/embedserver /usr/local/bin/embedserver
 COPY --from=model /model.gguf /model.gguf
 
-# Trim the glibc malloc arena back to the OS whenever a free block exceeds
-# 128 KiB. Without this, glibc keeps a large free-list for reuse and RSS
-# stays high even after llama.cpp frees its batch/computation buffers.
+# Force C allocations ≥ 64 KiB to use mmap instead of sbrk. mmap blocks are
+# always returned to the OS on free(), bypassing ptmalloc2's arena entirely —
+# no heap fragmentation possible for llama.cpp's larger batch/buffer allocs.
+ENV MALLOC_MMAP_THRESHOLD_=65536
+# Trim the sbrk arena after freeing small blocks. Works in tandem with the
+# malloc_trim(0) call in the Go periodic loop and with MALLOC_MMAP_THRESHOLD_
+# (which handles large blocks via mmap instead).
 ENV MALLOC_TRIM_THRESHOLD_=131072
 
 EXPOSE 8080
