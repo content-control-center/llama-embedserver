@@ -169,6 +169,7 @@ func main() {
 	grpcAddr := flag.String("grpc-addr", ":9090", "gRPC listen address")
 	gpuLayers := flag.Int("gpu-layers", 0, "GPU layers to offload (-1 for all)")
 	contextSize := flag.Int("context-size", 512, "KV cache context window in tokens — bounds peak memory")
+	threads := flag.Int("threads", 2, "CPU threads for llama.cpp inference — requests are serialized so more than 2-4 rarely helps")
 	memLimitMiB := flag.Int64("mem-limit-mib", 128, "Soft Go heap memory limit in MiB (0 = unlimited)")
 	gcInterval := flag.Duration("gc-interval", 30*time.Second, "How often to force-return freed memory to the OS")
 	flag.Parse()
@@ -205,6 +206,10 @@ func main() {
 		// Single parallel sequence: we serialize requests with mu anyway,
 		// so extra slots just waste memory (default for embedding ctx is 8).
 		llama.WithParallel(1),
+		// Cap the llama.cpp compute thread pool. Requests are serialized so
+		// all threads serve a single inference at a time — NumCPU() threads
+		// just inflate the thread count with no throughput benefit.
+		llama.WithThreads(*threads),
 	)
 	if err != nil {
 		log.Fatalf("failed to create embedding context: %v", err)

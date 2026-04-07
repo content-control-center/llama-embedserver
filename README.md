@@ -31,6 +31,7 @@ docker run --rm -p 8080:8080 llama-embedserver
 | `-grpc-addr` | `:9090` | gRPC listen address |
 | `-gpu-layers` | `0` | GPU layers to offload (`-1` for all) |
 | `-context-size` | `512` | KV cache window in tokens — lower = less memory |
+| `-threads` | `2` | llama.cpp compute threads per inference — requests are serialized so more than 2–4 rarely helps |
 | `-mem-limit-mib` | `128` | Soft Go heap limit in MiB (`0` = unlimited) |
 | `-gc-interval` | `30s` | How often freed memory is force-returned to the OS |
 
