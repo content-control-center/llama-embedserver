@@ -12,20 +12,17 @@ The build clones the llama-go repo with submodules, compiles llama.cpp from sour
 
 ## Usage
 
-Mount a directory containing your GGUF embedding model and run:
+The model (`embeddinggemma-300M Q8_0`, ~329MB) is baked into the image at build time. No volume mounts needed.
 
 ```bash
-docker run --rm -p 8080:8080 \
-  -v /path/to/models:/models \
-  llama-embedserver \
-  -model /models/model.gguf
+docker run --rm -p 8080:8080 llama-embedserver
 ```
 
 ### Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-model` | *(required)* | Path to the GGUF model file |
+| `-model` | `/model.gguf` | Path to the GGUF model file |
 | `-addr` | `:8080` | Listen address |
 | `-gpu-layers` | `0` | GPU layers to offload (`-1` for all) |
 
@@ -68,16 +65,12 @@ curl -X POST http://localhost:8080/embed/batch \
 }
 ```
 
-## Tested models
-
-- `nomic-embed-text-v1.5.f32.gguf`
-- `Qwen3-0.6B-Q8_0.gguf`
-
 ## Image structure
 
 | Stage | Base | Purpose |
 |-------|------|---------|
+| `model` | `debian:bookworm-slim` | Downloads the GGUF model (~329MB) |
 | `builder` | `golang:bookworm` | Clones repo, builds `libbinding.a` (static), compiles server binary |
-| final | `debian:bookworm-slim` | Runtime — binary only, ~100MB |
+| final | `debian:bookworm-slim` | Runtime — binary + baked-in model |
 
-Models are not baked into the image. Mount them as a volume to keep the image small and reusable across models.
+The model and build are separate stages so Docker caches them independently — rebuilding after code changes won't re-download the model.

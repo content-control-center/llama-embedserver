@@ -1,4 +1,13 @@
-# Stage 1: Build the static library and Go binary
+# Stage 1: Download the model
+FROM debian:bookworm-slim AS model
+
+RUN apt-get update && apt-get install -y wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q -O /model.gguf \
+    https://huggingface.co/Bhuvneesh/embeddinggemma-300m-Q8_0-GGUF/resolve/main/embeddinggemma-300m-q8_0.gguf
+
+# Stage 2: Build the static library and Go binary
 FROM golang:bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
@@ -22,7 +31,7 @@ RUN LIBRARY_PATH=/workspace \
     CGO_ENABLED=1 \
     go build -o /usr/local/bin/embedserver ./cmd/embedserver
 
-# Stage 2: Minimal runtime image
+# Stage 3: Minimal runtime image
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
@@ -33,11 +42,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/bin/embedserver /usr/local/bin/embedserver
-
-# Mount your model directory here: -v /path/to/models:/models
-VOLUME ["/models"]
+COPY --from=model /model.gguf /model.gguf
 
 EXPOSE 8080
 
 ENTRYPOINT ["embedserver"]
-CMD ["-model", "/models/model.gguf"]
+CMD ["-model", "/model.gguf"]
