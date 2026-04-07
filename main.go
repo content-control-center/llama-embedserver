@@ -27,7 +27,8 @@ type Embedder interface {
 }
 
 type server struct {
-	embedder Embedder
+	embedder   Embedder
+	dimensions int
 	// mu serializes all calls into the llama.cpp context.
 	// Context is NOT thread-safe (llama-go docs) — the library's RLock on
 	// GetEmbeddings only protects Go fields, not the underlying C++ state.
@@ -52,6 +53,10 @@ type batchResponse struct {
 	Dimensions int         `json:"dimensions"`
 }
 
+type infoResponse struct {
+	Dimensions int `json:"dimensions"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -65,6 +70,11 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *server) handleInfo(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(infoResponse{Dimensions: s.dimensions})
 }
 
 func (s *server) handleEmbed(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +211,15 @@ func main() {
 	}
 	defer embedCtx.Close()
 
-	srv := &server{embedder: embedCtx}
+	// Probe embed: discovers the model's embedding dimensionality at startup.
+	// A single short text is enough; the result is discarded.
+	probe, err := embedCtx.GetEmbeddings("a")
+	if err != nil {
+		log.Fatalf("probe embed (dimension discovery): %v", err)
+	}
+	log.Printf("embedding dimensions: %d", len(probe))
+
+	srv := &server{embedder: embedCtx, dimensions: len(probe)}
 
 	// gRPC server — shares srv (and its mutex) with the HTTP server.
 	go func() {
@@ -218,6 +236,7 @@ func main() {
 	}()
 
 	http.HandleFunc("/health", srv.handleHealth)
+	http.HandleFunc("/info", srv.handleInfo)
 	http.HandleFunc("/embed", srv.handleEmbed)
 	http.HandleFunc("/embed/batch", srv.handleBatch)
 
