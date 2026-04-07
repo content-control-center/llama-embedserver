@@ -128,7 +128,7 @@ grpcurl -plaintext -d '{"texts": ["Hello world", "Goodbye world"]}' \
 
 ## Genkit integration
 
-[llama-genkit-embedder](https://github.com/content-control-center/llama-genkit-embedder) is a [Genkit](https://firebase.google.com/docs/genkit/go) embedder plugin that connects to this server over gRPC, making it a drop-in embedder for Genkit flows and retrievers.
+[llama-genkit-embedder](https://github.com/content-control-center/llama-genkit-embedder) is a [Genkit](https://firebase.google.com/docs/genkit/go) embedder plugin that connects to this server over HTTP(s), making it a drop-in embedder for Genkit flows and retrievers.
 
 ### Install
 
@@ -153,8 +153,7 @@ func main() {
     }
 
     embedder, err := llamaembedder.Init(g, &llamaembedder.Config{
-        // gRPC address of the running llama-embedserver
-        Address: "localhost:9090",
+        LlamaEmbedServerAddress: "http://localhost:8080",
     })
     if err != nil {
         log.Fatal(err)
@@ -173,12 +172,6 @@ resp, err := ai.Embed(ctx, embedder, &ai.EmbedRequest{
         ai.DocumentFromText("Hello world", nil),
     },
 })
-```
-
-Start the embedding server before running your Genkit app:
-
-```bash
-docker run --rm -p 8080:8080 -p 9090:9090 llama-embedserver
 ```
 
 ---
