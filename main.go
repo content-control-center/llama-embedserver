@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"sync"
 	"time"
 
 	llama "github.com/tcpipuk/llama-go"
+	"google.golang.org/grpc"
 )
 
 // Embedder is the inference capability the server depends on.
@@ -153,7 +155,8 @@ func freeMemoryLoop(interval time.Duration) {
 
 func main() {
 	modelPath := flag.String("model", "", "Path to GGUF model file (required)")
-	addr := flag.String("addr", ":8080", "Listen address")
+	addr := flag.String("addr", ":8080", "HTTP listen address")
+	grpcAddr := flag.String("grpc-addr", ":9090", "gRPC listen address")
 	gpuLayers := flag.Int("gpu-layers", 0, "GPU layers to offload (-1 for all)")
 	contextSize := flag.Int("context-size", 512, "KV cache context window in tokens — bounds peak memory")
 	memLimitMiB := flag.Int64("mem-limit-mib", 128, "Soft Go heap memory limit in MiB (0 = unlimited)")
@@ -199,10 +202,25 @@ func main() {
 	defer embedCtx.Close()
 
 	srv := &server{embedder: embedCtx}
+
+	// gRPC server — shares srv (and its mutex) with the HTTP server.
+	go func() {
+		lis, err := net.Listen("tcp", *grpcAddr)
+		if err != nil {
+			log.Fatalf("gRPC listen: %v", err)
+		}
+		grpcSrv := grpc.NewServer()
+		RegisterEmbedServiceServer(grpcSrv, &grpcServer{srv: srv})
+		log.Printf("gRPC listening on %s", *grpcAddr)
+		if err := grpcSrv.Serve(lis); err != nil {
+			log.Fatalf("gRPC serve: %v", err)
+		}
+	}()
+
 	http.HandleFunc("/health", srv.handleHealth)
 	http.HandleFunc("/embed", srv.handleEmbed)
 	http.HandleFunc("/embed/batch", srv.handleBatch)
 
-	log.Printf("listening on %s", *addr)
+	log.Printf("HTTP listening on %s", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }

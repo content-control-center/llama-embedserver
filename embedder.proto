@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package embedder;
+
+// go_package path matches the module + cmd path so generated files land in
+// package main alongside the rest of the server code.
+option go_package = "github.com/tcpipuk/llama-go/cmd/embedserver;main";
+
+service EmbedService {
+  rpc Health    (HealthRequest)    returns (HealthResponse);
+  rpc Embed     (EmbedRequest)     returns (EmbedResponse);
+  rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
+}
+
+message HealthRequest  {}
+message HealthResponse { string status = 1; }
+
+message EmbedRequest  { string text = 1; }
+message EmbedResponse {
+  repeated float embedding  = 1;
+  int32          dimensions = 2;
+}
+
+// EmbeddingVector holds one row of a batch result.
+message EmbeddingVector { repeated float values = 1; }
+
+message EmbedBatchRequest  { repeated string          texts      = 1; }
+message EmbedBatchResponse {
+  repeated EmbeddingVector  embeddings = 1;
+  int32                     dimensions = 2;
+}

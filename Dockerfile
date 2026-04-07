@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     cmake \
     git \
     libcurl4-openssl-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
@@ -23,14 +24,34 @@ RUN git clone --recurse-submodules https://github.com/tcpipuk/llama-go .
 
 RUN make libbinding.a CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF"
 
-# Copy the embedding server source into the cloned module so it resolves imports locally
-COPY main.go ./cmd/embedserver/main.go
-COPY main_test.go ./cmd/embedserver/main_test.go
-COPY main_integration_test.go ./cmd/embedserver/main_integration_test.go
+# Install protoc Go plugins — cached until plugin versions change.
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest \
+ && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Generate gRPC code — invalidated only when the proto file changes.
+COPY embedder.proto ./cmd/embedserver/embedder.proto
+RUN PATH="$PATH:$(go env GOPATH)/bin" \
+    protoc \
+      --proto_path=cmd/embedserver \
+      --go_out=cmd/embedserver \
+      --go_opt=paths=source_relative \
+      --go-grpc_out=cmd/embedserver \
+      --go-grpc_opt=paths=source_relative \
+      embedder.proto
+
+# Copy application source — invalidated when source changes.
+COPY main.go grpc_server.go ./cmd/embedserver/
+COPY main_test.go grpc_server_test.go main_integration_test.go ./cmd/embedserver/
+
+# Fetch gRPC runtime dependencies into the module, then build.
+RUN GOFLAGS="-mod=mod" go get \
+    google.golang.org/grpc \
+    google.golang.org/protobuf
 
 RUN LIBRARY_PATH=/workspace \
     C_INCLUDE_PATH=/workspace \
     CGO_ENABLED=1 \
+    GOFLAGS="-mod=mod" \
     go build -o /usr/local/bin/embedserver ./cmd/embedserver
 
 # Stage 3: Minimal runtime image
@@ -57,6 +78,7 @@ RUN chmod +x /entrypoint.sh
 ENV MALLOC_CONF="background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000,narenas:1"
 
 EXPOSE 8080
+EXPOSE 9090
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["-model", "/model.gguf"]

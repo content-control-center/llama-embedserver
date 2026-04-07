@@ -1,5 +1,6 @@
 IMAGE      ?= llama-embedserver
 PORT       ?= 8080
+GRPC_PORT  ?= 9090
 MODELS_DIR ?= $(PWD)/models
 TEST_MODEL ?= /models/model.gguf
 
@@ -18,8 +19,8 @@ help: ## Show available targets
 build: ## Build the production Docker image
 	docker build -t $(IMAGE) .
 
-run: build ## Run the embedding server on PORT (default 8080)
-	docker run --rm -p $(PORT):8080 $(IMAGE)
+run: build ## Run the embedding server on PORT (default 8080) and GRPC_PORT (default 9090)
+	docker run --rm -p $(PORT):8080 -p $(GRPC_PORT):9090 $(IMAGE)
 
 test: _builder ## Run unit tests inside the builder container
 	docker run --rm $(IMAGE)-builder \

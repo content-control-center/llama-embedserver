@@ -27,7 +27,8 @@ docker run --rm -p 8080:8080 llama-embedserver
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-model` | `/model.gguf` | Path to the GGUF model file |
-| `-addr` | `:8080` | Listen address |
+| `-addr` | `:8080` | HTTP listen address |
+| `-grpc-addr` | `:9090` | gRPC listen address |
 | `-gpu-layers` | `0` | GPU layers to offload (`-1` for all) |
 | `-context-size` | `512` | KV cache window in tokens — lower = less memory |
 | `-mem-limit-mib` | `128` | Soft Go heap limit in MiB (`0` = unlimited) |
@@ -70,6 +71,54 @@ curl -X POST http://localhost:8080/embed/batch \
 ```json
 {
   "embeddings": [[0.023, -0.147, ...], [0.051, 0.093, ...]],
+  "dimensions": 896
+}
+```
+
+---
+
+## gRPC API
+
+The server also exposes a gRPC interface on port `9090` with the same three operations. The proto definition is in [`embedder.proto`](embedder.proto).
+
+```bash
+docker run --rm -p 8080:8080 -p 9090:9090 llama-embedserver
+```
+
+### Health
+
+```bash
+grpcurl -plaintext localhost:9090 embedder.EmbedService/Health
+```
+```json
+{ "status": "ok" }
+```
+
+### Embed — single embedding
+
+```bash
+grpcurl -plaintext -d '{"text": "Hello world"}' \
+  localhost:9090 embedder.EmbedService/Embed
+```
+```json
+{
+  "embedding": [0.023, -0.147, "..."],
+  "dimensions": 896
+}
+```
+
+### EmbedBatch — batch embeddings
+
+```bash
+grpcurl -plaintext -d '{"texts": ["Hello world", "Goodbye world"]}' \
+  localhost:9090 embedder.EmbedService/EmbedBatch
+```
+```json
+{
+  "embeddings": [
+    {"values": [0.023, -0.147, "..."]},
+    {"values": [0.051,  0.093, "..."]}
+  ],
   "dimensions": 896
 }
 ```
