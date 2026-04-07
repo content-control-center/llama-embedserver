@@ -14,10 +14,13 @@ RUN git clone --recurse-submodules https://github.com/tcpipuk/llama-go .
 
 RUN make libbinding.a CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF"
 
+# Copy the embedding server source into the cloned module so it resolves imports locally
+COPY main.go ./cmd/embedserver/main.go
+
 RUN LIBRARY_PATH=/workspace \
     C_INCLUDE_PATH=/workspace \
     CGO_ENABLED=1 \
-    go build -o /usr/local/bin/simple ./examples/simple
+    go build -o /usr/local/bin/embedserver ./cmd/embedserver
 
 # Stage 2: Minimal runtime image
 FROM debian:bookworm-slim
@@ -29,10 +32,12 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/local/bin/simple /usr/local/bin/simple
+COPY --from=builder /usr/local/bin/embedserver /usr/local/bin/embedserver
 
 # Mount your model directory here: -v /path/to/models:/models
 VOLUME ["/models"]
 
-ENTRYPOINT ["simple"]
-CMD ["-m", "/models/model.gguf", "-p", "Hello world", "-n", "50"]
+EXPOSE 8080
+
+ENTRYPOINT ["embedserver"]
+CMD ["-model", "/models/model.gguf"]
