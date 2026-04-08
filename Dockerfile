@@ -22,7 +22,7 @@ WORKDIR /workspace
 
 RUN git clone --recurse-submodules https://github.com/tcpipuk/llama-go .
 
-RUN make libbinding.a CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF"
+RUN make libbinding.a CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF -DGGML_AVX512_BF16=OFF"
 
 # Install protoc Go plugins — cached until plugin versions change.
 RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest \
