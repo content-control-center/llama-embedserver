@@ -128,12 +128,12 @@ grpcurl -plaintext -d '{"texts": ["Hello world", "Goodbye world"]}' \
 
 ## Genkit integration
 
-[llama-genkit-embedder](https://github.com/content-control-center/llama-genkit-embedder) is a [Genkit](https://firebase.google.com/docs/genkit/go) embedder plugin that connects to this server over HTTP(s), making it a drop-in embedder for Genkit flows and retrievers.
+[llama-genkit-embedder](https://github.com/alephbet-ai/llama-genkit-embedder) is a [Genkit](https://firebase.google.com/docs/genkit/go) embedder plugin that connects to this server over HTTP(s), making it a drop-in embedder for Genkit flows and retrievers.
 
 ### Install
 
 ```bash
-go get github.com/content-control-center/llama-genkit-embedder
+go get github.com/alephbet-ai/llama-genkit-embedder
 ```
 
 ### Register the plugin
@@ -141,7 +141,7 @@ go get github.com/content-control-center/llama-genkit-embedder
 ```go
 import (
     "github.com/firebase/genkit/go/genkit"
-    llamaembedder "github.com/content-control-center/llama-genkit-embedder"
+    llamaembedder "github.com/alephbet-ai/llama-genkit-embedder"
 )
 
 func main() {
